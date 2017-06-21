@@ -2,21 +2,24 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
+use Psr7Middlewares\Utils;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Whoops\Run;
 use Whoops\Handler\PrettyPageHandler;
 use Whoops\Handler\PlainTextHandler;
 use Whoops\Handler\JsonResponseHandler;
+use Whoops\Handler\XmlResponseHandler;
 
 /**
  * Middleware to use whoops as error handler.
  */
 class Whoops
 {
+    use Utils\StreamTrait;
+
     /**
-     * @var Run|null To handle errors using whoops
+     * @var Run|null The provided instance of Whoops
      */
     private $whoops;
 
@@ -60,7 +63,15 @@ class Whoops
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
+        ob_start();
+        $level = ob_get_level();
+
+        $method = Run::EXCEPTION_HANDLER;
         $whoops = $this->getWhoopsInstance($request);
+
+        $whoops->allowQuit(false);
+        $whoops->writeToOutput(false);
+        $whoops->sendHttpCode(false);
 
         //Catch errors means register whoops globally
         if ($this->catchErrors) {
@@ -69,16 +80,16 @@ class Whoops
 
         try {
             $response = $next($request, $response);
-        } catch (\Exception $exception) {
-            $method = Run::EXCEPTION_HANDLER;
-
-            $whoops->allowQuit(false);
-            $whoops->writeToOutput(false);
-
-            $body = Middleware::createStream();
+        } catch (\Throwable $exception) {
+            $body = self::createStream($response->getBody());
             $body->write($whoops->$method($exception));
-
             $response = $response->withStatus(500)->withBody($body);
+        } catch (\Exception $exception) {
+            $body = self::createStream($response->getBody());
+            $body->write($whoops->$method($exception));
+            $response = $response->withStatus(500)->withBody($body);
+        } finally {
+            Utils\Helpers::getOutput($level);
         }
 
         if ($this->catchErrors) {
@@ -90,7 +101,7 @@ class Whoops
 
     /**
      * Returns the whoops instance or create one.
-     * 
+     *
      * @param ServerRequestInterface $request
      *
      * @return Run
@@ -103,15 +114,42 @@ class Whoops
 
         $whoops = new Run();
 
-        //Is ajax?
-        if (strtolower($request->getHeaderLine('X-Requested-With')) === 'xmlhttprequest') {
-            $whoops->pushHandler(new JsonResponseHandler());
-        } else {
-            $whoops->pushHandler(new PrettyPageHandler());
+        if (php_sapi_name() === 'cli') {
+            $whoops->pushHandler(new PlainTextHandler());
+
+            return $whoops;
         }
 
-        //Command line
-        $whoops->pushHandler(new PlainTextHandler());
+        $format = FormatNegotiator::getFormat($request);
+
+        switch ($format) {
+            case 'json':
+                $whoops->pushHandler(new JsonResponseHandler());
+                break;
+
+            case 'html':
+                $whoops->pushHandler(new PrettyPageHandler());
+                break;
+
+            case 'xml':
+                $whoops->pushHandler(new XmlResponseHandler());
+                break;
+
+            case 'txt':
+            case 'css':
+            case 'js':
+                $whoops->pushHandler(new PlainTextHandler());
+                break;
+
+            default:
+                if (empty($format)) {
+                    $whoops->pushHandler(new PrettyPageHandler());
+                } else {
+                    $whoops->pushHandler(new PlainTextHandler());
+                }
+
+                break;
+        }
 
         return $whoops;
     }

@@ -2,7 +2,8 @@
 
 namespace Psr7Middlewares\Utils;
 
-use Psr7Middlewares\Middleware;
+use Psr7Middlewares\Middleware\BasePath;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\UriInterface;
 use InvalidArgumentException;
@@ -12,16 +13,16 @@ use InvalidArgumentException;
  */
 trait RedirectTrait
 {
-    /** 
+    /**
      * @var int|false Redirect HTTP status code
      */
-    private $redirectStatus;
+    private $redirectStatus = false;
 
     /**
      * Set HTTP redirect status code.
      *
      * @param int|false $redirectStatus Redirect HTTP status code
-     * 
+     *
      * @return self
      */
     public function redirect($redirectStatus = 302)
@@ -37,16 +38,24 @@ trait RedirectTrait
 
     /**
      * Returns a redirect response.
-     * 
-     * @param int               $redirectStatus
-     * @param UriInterface      $uri
-     * @param ResponseInterface $response
+     *
+     * @param ServerRequestInterface $request
+     * @param UriInterface           $uri
+     * @param ResponseInterface      $response
+     *
+     * @return ResponseInterface
      */
-    private static function getRedirectResponse($redirectStatus, UriInterface $uri, ResponseInterface $response)
+    private function getRedirectResponse(ServerRequestInterface $request, UriInterface $uri, ResponseInterface $response)
     {
+        //Fix the basePath
+        $generator = BasePath::getGenerator($request);
+
+        if ($generator !== null) {
+            $uri = $uri->withPath($generator($uri->getPath()));
+        }
+
         return $response
-            ->withStatus($redirectStatus)
-            ->withHeader('Location', (string) $uri)
-            ->withBody(Middleware::createStream());
+            ->withStatus($this->redirectStatus)
+            ->withHeader('Location', (string) $uri);
     }
 }

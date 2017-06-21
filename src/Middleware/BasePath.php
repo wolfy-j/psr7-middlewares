@@ -3,7 +3,6 @@
 namespace Psr7Middlewares\Middleware;
 
 use Psr7Middlewares\Utils;
-use Psr7Middlewares\Middleware;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -13,8 +12,10 @@ use Psr\Http\Message\ResponseInterface;
 class BasePath
 {
     const KEY = 'BASE_PATH';
+    const KEY_GENERATOR = 'BASE_PATH_GENERATOR';
 
     use Utils\BasePathTrait;
+    use Utils\AttributeTrait;
 
     /**
      * @var bool
@@ -30,7 +31,19 @@ class BasePath
      */
     public static function getBasePath(ServerRequestInterface $request)
     {
-        return Middleware::getAttribute($request, self::KEY);
+        return self::getAttribute($request, self::KEY);
+    }
+
+    /**
+     * Returns a callable to build a full path.
+     *
+     * @param ServerRequestInterface $request
+     *
+     * @return callable|null
+     */
+    public static function getGenerator(ServerRequestInterface $request)
+    {
+        return self::getAttribute($request, self::KEY_GENERATOR);
     }
 
     /**
@@ -49,7 +62,7 @@ class BasePath
      * Autodetect the basePath.
      *
      * @param bool $autodetect
-     * 
+     *
      * @return self
      */
     public function autodetect($autodetect = true)
@@ -78,7 +91,12 @@ class BasePath
         $path = $this->getPath($uri->getPath());
         $request = $request->withUri($uri->withPath($path));
 
-        $request = Middleware::setAttribute($request, self::KEY, $this->basePath);
+        $generator = function ($path) {
+            return Utils\Helpers::joinPath($this->basePath, $path);
+        };
+
+        $request = self::setAttribute($request, self::KEY, $this->basePath);
+        $request = self::setAttribute($request, self::KEY_GENERATOR, $generator);
 
         return $next($request, $response);
     }
@@ -88,10 +106,10 @@ class BasePath
      *
      * Uses a variety of criteria in order to detect the base URL of the request
      * (i.e., anything additional to the document root).
-     * 
+     *
      * This code has been adapted from the Zend implementation:
      * https://github.com/zendframework/zend-http/blob/master/src/PhpEnvironment/Request.php
-     * 
+     *
      * @param ServerRequestInterface $request
      *
      * @return string

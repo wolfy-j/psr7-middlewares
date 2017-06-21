@@ -2,7 +2,7 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
+use Psr7Middlewares\Utils;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Geocoder\Geocoder;
@@ -17,12 +17,19 @@ use RuntimeException;
  */
 class Geolocate
 {
+    use Utils\StorageTrait;
+
     const KEY = 'GEOLOCATE';
 
     /**
      * @var Geocoder
      */
     private $geocoder;
+
+    /**
+     * @var bool
+     */
+    private $saveInSession = false;
 
     /**
      * Returns the client location.
@@ -33,7 +40,7 @@ class Geolocate
      */
     public static function getLocation(ServerRequestInterface $request)
     {
-        return Middleware::getAttribute($request, self::KEY);
+        return self::getAttribute($request, self::KEY);
     }
 
     /**
@@ -52,6 +59,20 @@ class Geolocate
     }
 
     /**
+     * Wheter or not save the geolocation in a session variable.
+     *
+     * @param bool $save
+     *
+     * @return self
+     */
+    public function saveInSession($save = true)
+    {
+        $this->saveInSession = $save;
+
+        return $this;
+    }
+
+    /**
      * Execute the middleware.
      *
      * @param ServerRequestInterface $request
@@ -62,14 +83,27 @@ class Geolocate
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, ClientIp::KEY)) {
+        if (!self::hasAttribute($request, ClientIp::KEY)) {
             throw new RuntimeException('Geolocate middleware needs ClientIp executed before');
         }
 
         $ip = ClientIp::getIp($request);
 
         if ($ip !== null) {
-            $request = Middleware::setAttribute($request, self::KEY, $this->geocoder->geocode($ip));
+            if ($this->saveInSession) {
+                $ips = &self::getStorage($request, self::KEY);
+
+                if (isset($ips[$ip])) {
+                    $address = new AddressCollection($ips[$ip]);
+                } else {
+                    $address = $this->geocoder->geocode($ip);
+                    $ips[$ip] = $address->all();
+                }
+            } else {
+                $address = $this->geocoder->geocode($ip);
+            }
+
+            $request = self::setAttribute($request, self::KEY, $address);
         }
 
         return $next($request, $response);

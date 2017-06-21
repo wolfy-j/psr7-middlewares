@@ -1,3 +1,5 @@
+> **NOTE:** This package is being ported to PSR-15. [Check it out here](https://github.com/middlewares/psr15-middlewares)
+
 # psr7-middlewares
 
 
@@ -7,6 +9,7 @@
 [![SensioLabsInsight](https://insight.sensiolabs.com/projects/0d91152f-1308-4709-b834-ea048afee7da/big.png)](https://insight.sensiolabs.com/projects/0d91152f-1308-4709-b834-ea048afee7da)
 
 Collection of [PSR-7](http://www.php-fig.org/psr/psr-7/) middlewares.
+
 
 ## Requirements
 
@@ -26,11 +29,13 @@ function (RequestInterface $request, ResponseInterface $response, callable $next
 So, you can use these midlewares with:
 
 * [Relay](https://github.com/relayphp/Relay.Relay)
-* [Expressive](http://framework.zend.com/expressive)
-* [Slim 3](http://www.slimframework.com/)
+* [Expressive](https://docs.zendframework.com/zend-expressive/)
+* [Slim 3](http://www.slimframework.com)
+* [Spiral](http://spiral-framework.com)
+* [Middleman](https://github.com/mindplay-dk/middleman)
 * etc...
 
-## Instalation
+## Installation
 
 This package is installable and autoloadable via Composer as [oscarotero/psr7-middlewares](https://packagist.org/packages/oscarotero/psr7-middlewares).
 
@@ -68,26 +73,11 @@ $dispatcher = $relay->newInstance([
     //Minify the result
     Middleware::minify(),
 
-    //Adds the php debug bar
-    Middleware::debugBar(),
-    
     //Handle errors
-    Middleware::errorHandler('error_handler_function')->catchExceptions(true),
+    Middleware::errorHandler()->catchExceptions(true),
 
     //Override the method using X-Http-Method-Override header
     Middleware::methodOverride(),
-
-    //Removes www subdomain
-    Middleware::www(false)->redirect(301),
-
-    //Block search engines robots indexing
-    Middleware::robots(),
-
-    //Geolocation
-    Middleware::geolocate(),
-
-    //Detect client device
-    Middleware::detectDevice(),
 
     //Parse the request payload
     Middleware::payload(),
@@ -112,6 +102,9 @@ $dispatcher = $relay->newInstance([
 
     //Detects the format
     Middleware::formatNegotiator(),
+
+    //Adds the php debug bar
+    Middleware::debugBar(),
 
     //Execute fast route
     Middleware::fastRoute($app->get('dispatcher')),
@@ -140,6 +133,7 @@ $response = $dispatcher(ServerRequestFactory::fromGlobals(), new Response());
 * [DigestAuthentication](#digestauthentication)
 * [EncodingNegotiator](#encodingnegotiator)
 * [ErrorHandler](#errorhandler)
+* [Expires](#expires)
 * [FastRoute](#fastroute)
 * [FormTimestamp](#formtimestamp)
 * [Firewall](#firewall)
@@ -149,6 +143,8 @@ $response = $dispatcher(ServerRequestFactory::fromGlobals(), new Response());
 * [Honeypot](#honeypot)
 * [Https](#https)
 * [ImageTransformer](#imagetransformer)
+* [IncludeResponse](#includeresponse)
+* [JsonSchema](#jsonschema)
 * [LanguageNegotiation](#languagenegotiation)
 * [LeagueRoute](#leagueroute)
 * [MethodOverride](#methodoverride)
@@ -159,7 +155,7 @@ $response = $dispatcher(ServerRequestFactory::fromGlobals(), new Response());
 * [ReadResponse](#readresponse)
 * [Recaptcha](#recaptcha)
 * [Rename](#rename)
-* [ResponseTime](#responseTime)
+* [ResponseTime](#responsetime)
 * [Robots](#robots)
 * [SaveResponse](#saveresponse)
 * [Shutdown](#shutdown)
@@ -183,45 +179,47 @@ use Monolog\Handler\ErrorLogHandler;
 $logger = new Logger('access');
 $logger->pushHandler(new ErrorLogHandler());
 
-//Add to the dispatcher
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     //Required to get the Ip
     Middleware::ClientIp(),
 
     Middleware::AccessLog($logger) //Instance of Psr\Log\LoggerInterface
         ->combined(true)           //(optional) To use the Combined Log Format instead the Common Log Format
-]);
+];
 ```
 
 
 ### AttributeMapper
 
-Maps middleware specific attribute to regural request attribute under desired name:
+Maps middleware specific attribute to regular request attribute under desired name:
 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
+    //Example with authentication
     Middleware::BasicAuthentication([
-            'username1' => 'password1',
-            'username2' => 'password2'
-        ])
-        ->realm('My realm'), //(optional) change the realm value
-    
+        'username1' => 'password1',
+        'username2' => 'password2'
+    ]),
+
+    //Map the key used by this middleware
     Middleware::attributeMapper([
         Middleware\BasicAuthentication::KEY => 'auth:username'
     ]),
-        
+
     function ($request, $response, $next) {
+        //We can get the username as usual
         $username = BasicAuthentication::getUsername($request);
-    
+
+        //But also using the "auth:username" attribute name.
         assert($username === $request->getAttribute('auth:username'));
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### AuraRouter
@@ -260,11 +258,11 @@ $map->get('hello', '/hello/{name}', function ($request, $response, $myApp) {
 });
 
 //Add to the dispatcher
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::AuraRouter($router) //Instance of Aura\Router\RouterContainer
         ->arguments($myApp)         //(optional) append more arguments to the controller
-]);
+];
 ```
 
 ### AuraSession
@@ -275,7 +273,7 @@ Creates a new [Aura.Session](https://github.com/auraphp/Aura.Session) instance w
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\AuraSession;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::AuraSession(),
         ->factory($sessionFactory) //(optional) Intance of Aura\Session\SessionFactory
@@ -287,29 +285,34 @@ $dispatcher = $relay->getInstance([
 
         return $response;
     }
-]);
+];
 ```
 
 ### BasePath
 
-Strip off the prefix from the uri path of the request. This is useful to combine with routers if the root of the website is in a subdirectory. For example, if the root of your website is `/web/public`, a request with the uri `/web/public/post/34` will be converted to `/post/34`. You can provide the basePath to remove or let the middleware autodetect it.
+Removes the prefix from the uri path of the request. This is useful to combine with routers if the root of the website is in a subdirectory. For example, if the root of your website is `/web/public`, a request with the uri `/web/public/post/34` will be converted to `/post/34`. You can provide the prefix to remove or let the middleware autodetect it. In the router you can retrieve the prefix removed or a callable to generate more urls with the base path.
 
 ```php
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\BasePath;
 
-$dispatcher = $relay->getInstance([
-    Middleware::BasePath()
-        ->basePath('/web/public') // (optional) The path to remove...
-        ->autodetect(true),       // (optional) ...or autodetect the base path
+$middlewares = [
+
+    Middleware::BasePath('/web/public') // (optional) The path to remove...
+        ->autodetect(true),             // (optional) ...or/and autodetect the base path
 
     function ($request, $response, $next) {
-        //Get the stripped off prefix
+        //Get the removed prefix
         $basePath = BasePath::getBasePath($request);
+
+        //Get a callable to generate full paths
+        $generator = BasePath::getGenerator($request);
+
+        $generator('/other/path'); // /web/public/other/path
 
         return $response;
     }
-]);
+];
 ```
 
 ### BasicAuthentication
@@ -319,20 +322,20 @@ Implements the [basic http authentication](http://php.net/manual/en/features.htt
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::BasicAuthentication([
             'username1' => 'password1',
             'username2' => 'password2'
         ])
         ->realm('My realm'), //(optional) change the realm value
-        
+
     function ($request, $response, $next) {
         $username = BasicAuthentication::getUsername($request);
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### BlockSpam
@@ -342,24 +345,24 @@ To block referral spam usin the [piwik/referrer-spam-blacklist](https://github.c
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::BlockSpam('spammers.txt'), //(optional) to set a custom spammers list instead the piwik's list
-]);
+];
 ```
 
 ### Cache
 
-Uses [micheh/psr7-cache](https://github.com/micheh/psr7-cache). Saves the responses' headers in cache and returns a 304 response (Not modified) if the request is cached. It also adds `Cache-Control` and `Last-Modified` headers to the response. You need a cache library compatible with psr-6.
+Requires [micheh/psr7-cache](https://github.com/micheh/psr7-cache). Saves the responses' headers in cache and returns a 304 response (Not modified) if the request is cached. It also adds `Cache-Control` and `Last-Modified` headers to the response. You need a cache library compatible with psr-6.
 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::Cache(new Psr6CachePool()) //the PSR-6 cache implementation
         ->cacheControl('max-age=3600'),    //(optional) to add this Cache-Control header to all responses
-]);
+];
 ```
 
 ### ClientIp
@@ -370,7 +373,7 @@ Detects the client ip(s).
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\ClientIp;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::ClientIp()
         ->remote()  // (optional) Hack to get the ip from localhost environment
@@ -389,7 +392,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### Cors
@@ -399,7 +402,7 @@ To use the [neomerx/cors-psr7](https://github.com/neomerx/cors-psr7) library:
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::Cors($settings)                 //(optional) instance of Neomerx\Cors\Contracts\Strategies\SettingsStrategyInterface
         ->origin('http://example.com:123')      //(optional) the server origin
@@ -427,7 +430,7 @@ $dispatcher = $relay->getInstance([
         ->allowCredentials()                    //(optional) If access with credentials is supported by the resource.
         ->maxAge(0)                             //(optional) Set pre-flight cache max period in seconds.
         ->checkHost(true)                       //(optional) If request 'Host' header should be checked against server's origin.
-]);
+];
 ```
 
 ### Csp
@@ -436,25 +439,27 @@ To use the [paragonie/csp-builder](https://github.com/paragonie/csp-builder) lib
 
 ```php
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::csp($directives)                          //(optional) the array with the directives.
         ->addSource('img-src', 'https://ytimg.com')       //(optional) to add extra sources to whitelist
         ->addDirective('upgrade-insecure-requests', true) //(optional) to add new directives (if it doesn't already exist)
         ->supportOldBrowsers(false)                       //(optional) support old browsers (e.g. safari). True by default
-]);
+];
 ```
 
 ### Csrf
 
-To add a protection layer agains CSRF (Cross Site Request Forgety). The middleware injects a hidden input with a token in all POST forms and them check whether the token is valid or not.
+To add a protection layer agains CSRF (Cross Site Request Forgery). The middleware injects a hidden input with a token in all POST forms and them check whether the token is valid or not. Use `->autoInsert()` to insert automatically the token or, if you prefer, use the generator callable:
 
 ```php
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
-    //(optional) Used to open a PHP session before
-    Middleware::phpSession(),
+    //required to save the tokens in the user session
+    Middleware::AuraSession(),
+    //or
+    Middleware::PhpSession(),
 
     //required to get the format of the request (only executed in html requests)
     Middleware::FormatNegotiator(),
@@ -462,15 +467,29 @@ $dispatcher = $relay->getInstance([
     //required to get the user ip
     Middleware::ClientIp(),
 
-    Middleware::Csrf($storage)  //(optional) array or ArrayAccess used to store the CSRF tokens. If it's not defined use $_SESSION.
-]);
+    Middleware::Csrf()
+        ->autoInsert(), //(optional) To insert automatically the tokens in all POST forms
+
+    function ($request, $response, $next) {
+        //Get a callable to generate tokens (only if autoInsert() is disabled)
+        $generator = Middleware\Csrf::getGenerator($request);
+
+        //Use the generator (you must pass the action url)
+        $response->getBody()->write(
+            '<form action="/action.php" method="POST">'.
+            $generator('/action.php').
+            '<input type="submit">'.
+            '</form>'
+        );
+
+        return $next($request, $response);
+    }
+];
 ```
 
 ### DebugBar
 
-Inserts the [PHP debug bar](http://phpdebugbar.com/) in the html body. This middleware requires `Middleware::formatNegotiator` executed before, to insert the debug bar only in Html responses. 
-
-Because this middleware serves also the debugbar assets (css, js and fonts), it must be added before the router to avoid 404 responses.
+Inserts the [PHP debug bar 1.x](http://phpdebugbar.com/) in the html body. This middleware requires `Middleware::formatNegotiator` executed before, to insert the debug bar only in Html responses.
 
 ```php
 use Psr7Middlewares\Middleware;
@@ -478,13 +497,13 @@ use DebugBar\StandardDebugBar;
 
 $debugBar = new StandardDebugBar();
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
-    Middleware::FormatNegotiator(),
+    Middleware::FormatNegotiator(), //(recomended) to insert only in html responses
 
-    Middleware::DebugBar($debugBar) //(optional) Own instance of debugbar
+    Middleware::DebugBar($debugBar) //(optional) Instance of debugbar
         ->captureAjax(true)         //(optional) To send data in headers in ajax
-]);
+];
 ```
 
 ### Delay
@@ -494,12 +513,12 @@ Delays the response to simulate slow bandwidth in local environments. You can us
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::delay(3.5),      //delay the response 3.5 seconds
 
     Middleware::delay([1, 2.5]), //delay the response between 1 and 1.5 seconds
-]);
+];
 ```
 
 ### DetectDevice
@@ -510,7 +529,7 @@ Uses [Mobile-Detect](https://github.com/serbanghita/Mobile-Detect) library to de
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\DetectDevice;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::DetectDevice(),
 
@@ -530,7 +549,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     },
-]);
+];
 ```
 
 ### DigestAuthentication
@@ -540,7 +559,7 @@ Implements the [digest http authentication](http://php.net/manual/en/features.ht
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::DigestAuthentication([
             'username1' => 'password1',
@@ -548,13 +567,13 @@ $dispatcher = $relay->getInstance([
         ])
         ->realm('My realm') //(optional) custom realm value
         ->nonce(uniqid()),   //(optional) custom nonce value
-        
+
     function ($request, $response, $next) {
         $username = DigestAuthentication::getUsername($request);
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### EncodingNegotiator
@@ -565,7 +584,7 @@ Uses [willdurand/Negotiation (2.x)](https://github.com/willdurand/Negotiation) t
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\EncodingNegotiator;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::EncodingNegotiator()
         ->encodings(['gzip', 'deflate']), //(optional) configure the supported encoding types
@@ -576,7 +595,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### ErrorHandler
@@ -603,16 +622,34 @@ function handler($request, $response, $myApp) {
     }
 }
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::ErrorHandler('handler') //(optional) The error handler
         ->arguments($myApp)             //(optional) extra arguments to the handler
         ->catchExceptions()             //(optional) to catch exceptions
-]);
+        ->statusCode(function ($code) { //(optional) configure which status codes you want to handle with the errorHandler
+            return $code >= 400 && $code < 600 && $code != 422; // you can bypass some status codes in case you want to handle it
+        })
+];
+```
+
+### Expires
+Adds `Expires` and `max-age` directive of the `Cache-Control` header in the response. It's similar to the apache module [mod_expires](https://httpd.apache.org/docs/current/mod/mod_expires.html). By default uses the same configuration than [h5bp apache configuration](https://github.com/h5bp/server-configs-apache/blob/master/src/web_performance/expires_headers.conf). Useful for static files.
+
+```php
+use Psr7Middlewares\Middleware;
+
+$middlewares = [
+
+    Middleware::formatNegotiator(), //(recomended) to detect the content-type header
+
+    Middleware::expires()
+        ->addExpire('text/css', '+1 week') //Add or edit the expire of some types
+];
 ```
 
 ### FastRoute
-To use [FastRoute](https://github.com/nikic/FastRoute) as a middleware.
+To use [FastRoute](https://github.com/nikic/FastRoute) as middleware.
 
 ```php
 use Psr7Middlewares\Middleware;
@@ -624,23 +661,23 @@ $router = FastRoute\simpleDispatcher(function (FastRoute\RouteCollector $r) {
     });
 });
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::FastRoute($router) //Instance of FastRoute\Dispatcher
         ->argument($myApp)         //(optional) arguments appended to the controller
-]);
+];
 ```
 
 ### Firewall
 
-Uses [M6Web/Firewall](https://github.com/M6Web/Firewall) to provide a IP filtering. This middleware deppends of **ClientIp** (to extract the ips from the headers).
+Uses [M6Web/Firewall](https://github.com/M6Web/Firewall) to provide an IP filtering. This middleware deppends of **ClientIp** (to extract the ips from the headers).
 
 [See the ip formats allowed](https://github.com/M6Web/Firewall#entries-formats) for trusted/untrusted options:
 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     //required to capture the user ips before
     Middleware::ClientIp(),
@@ -649,7 +686,7 @@ $dispatcher = $relay->getInstance([
     Middleware::Firewall()
         ->trusted(['123.0.0.*'])   //(optional) ips allowed
         ->untrusted(['123.0.0.1']) //(optional) ips not allowed
-]);
+];
 ```
 
 ### FormatNegotiator
@@ -660,11 +697,11 @@ Uses [willdurand/Negotiation (2.x)](https://github.com/willdurand/Negotiation) t
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\FormatNegotiator;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::FormatNegotiator()
         ->defaultFormat('html') //(optional) default format if it's unable to detect. (by default is "html")
-        ->addFormat('pdf', ['application/pdf', 'application/x-download']), //(optional) add new formats and mimetypes
+        ->addFormat('tiff', ['image/tiff', 'image/x-tiff']), //(optional) add a new format associated with mimetypes
 
     function ($request, $response, $next) {
         //get the format (for example: html)
@@ -672,7 +709,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### FormTimestamp
@@ -682,9 +719,9 @@ Simple spam protection based on injecting a hidden input in all post forms with 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
-    //required to get the format of the request (only executed in html requests)
+    //(recomended) to detect html responses
     Middleware::FormatNegotiator(),
 
     Middleware::FormTimestamp()
@@ -692,7 +729,23 @@ $dispatcher = $relay->getInstance([
         ->min(5)                  //(optional) Minimum seconds needed to validate the request (default: 3)
         ->max(3600)               //(optional) Life of the form in second. Default is 0 (no limit)
         ->inputName('time-token') //(optional) Name of the input (default: hpt_time)
-]);
+        ->autoInsert(),           //(optional) To insert automatically the inputs in all POST forms
+
+    function ($request, $response, $next) {
+        //Get a callable to generate the inputs (only if autoInsert() is disabled)
+        $generator = Middleware\FormTimestamp::getGenerator($request);
+
+        //Use the generator (you must pass the action url)
+        $response->getBody()->write(
+            '<form action="/action.php" method="POST">'.
+            $generator().
+            '<input type="submit">'.
+            '</form>'
+        );
+
+        return $next($request, $response);
+    }
+];
 ```
 
 ### Geolocate
@@ -703,12 +756,19 @@ Uses [Geocoder library](https://github.com/geocoder-php/Geocoder) to geolocate t
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\Geolocate;
 
-$dispatcher = $relay->getInstance([
-    
+$middlewares = [
+
+    //(optional) only if you want to save the result in the user session
+    Middleware::PhpSession(),
+    //or
+    Middleware::AuraSession(),
+
+
     //required to capture the user ips before
     Middleware::ClientIp(),
 
-    Middleware::Geolocate($geocoder), //(optional) To provide a custom Geocoder instance
+    Middleware::Geolocate($geocoder) //(optional) To provide a custom Geocoder instance
+        ->saveInSession(),           //(optional) To save the result to reuse in the future requests (required a session middleware before)
 
     function ($request, $response, $next) {
         //get the location
@@ -721,7 +781,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### GoogleAnalytics
@@ -731,13 +791,13 @@ Inject the Google Analytics code in all html pages.
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
-    //required to get the format of the request
+$middlewares = [
+
+    //(recomended) to detect html responses
     Middleware::formatNegotiator(),
-    
+
     Middleware::GoogleAnalytics('UA-XXXXX-X') //The site id
-]);
+];
 ```
 
 ### Gzip
@@ -747,13 +807,13 @@ Use gzip functions to compress the response body, inserting also the `Content-En
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     //required to get the preferred encoding type
     Middleware::EncodingNegotiator(),
 
     Middleware::Gzip()
-]);
+];
 ```
 
 ### Honeypot
@@ -763,15 +823,31 @@ Implements a honeypot spam prevention. This technique is based on creating a inp
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
-    //required to get the format of the request (only executed in html requests)
+$middlewares = [
+
+    //(recomended) to detect html responses
     Middleware::formatNegotiator(),
-    
+
     Middleware::Honeypot()
         ->inputName('my_name') //(optional) The name of the input field (by default "hpt_name")
         ->inputClass('hidden') //(optional) The class of the input field (by default "hpt_input")
-]);
+        ->autoInsert(),        //(optional) To insert automatically the inputs in all POST forms
+
+    function ($request, $response, $next) {
+        //Get a callable to generate the inputs (only if autoInsert() is disabled)
+        $generator = Middleware\Honeypot::getGenerator($request);
+
+        //Use the generator (you must pass the action url)
+        $response->getBody()->write(
+            '<form action="/action.php" method="POST">'.
+            $generator().
+            '<input type="submit">'.
+            '</form>'
+        );
+
+        return $next($request, $response);
+    }
+];
 ```
 
 ### Https
@@ -781,12 +857,12 @@ Returns a redirection to the https scheme if the request uri is http. It also ad
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
-    Middleware::Https()
+    Middleware::Https(true)   //(optional) True to force https, false to force http (true by default)
         ->maxAge(1000000)     //(optional) max-age directive for the Strict-Transport-Security header. By default is 31536000 (1 year)
         ->includeSubdomains() //(optional) To add the "includeSubDomains" attribute to the Strict-Transport-Security header.
-]);
+];
 ```
 
 ### ImageTransformer
@@ -802,9 +878,9 @@ If you want to save the transformed images in the cache, provide a library compa
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
-    //required to get the format of the request
+$middlewares = [
+
+    //(recomended) to detect responses' mimetype
     Middleware::formatNegotiator(),
 
     Middleware::imageTransformer([   // The available sizes of the images.
@@ -815,10 +891,96 @@ $dispatcher = $relay->getInstance([
         ->clientHints()              // (optional) To enable the client hints headers
         ->cache(new Psr6CachePool()) // (optional) To save the transformed images in the cache
 
-    //Used to read the image files and returns the response with them
-    Middleware::readResponse()
-        ->storage('/path/to/images'),
-]);
+    function ($request, $response, $next) {
+        //Get the generator to generate urls
+        $generator = Middleware\ImageTransformer::getGenerator($request);
+
+        //Use the generator
+        $response->getBody()->write('<img src="'.$generator('images/picture.jpg', 'small.').'">');
+
+        return $next($request, $response);
+    }
+];
+```
+
+### IncludeResponse
+
+Useful to include old style applications, in which each page has it's own php file. For example, let's say we have an application with paths like `/about-us.php` or `/about-us` (resolved to `/about-us/index.php`), this middleware gets the php file, include it safely, capture the output and the headers send and create a response with the results. If the file does not exits, returns a `404` response (unless `continueOnError` is true).
+
+```php
+use Psr7Middlewares\Middleware;
+
+$middlewares = [
+    Middleware::includeResponse('/doc/root'), //The path of the document root
+        ->continueOnError(true)               // (optional) to continue with the next middleware on error or not
+];
+```
+
+### JsonValidator
+
+Uses [justinrainbow/json-schema](https://github.com/justinrainbow/json-schema) to validate an `application/json` request body with a JSON schema:
+
+```php
+use Psr7Middlewares\Middleware;
+use Psr7Middlewares\Middleware\JsonValidator;
+
+// Validate using a file:
+$middlewares = [
+    Middleware::payload(['forceArray' => false]),
+    JsonValidator::fromFile(new \SplFileObject(WEB_ROOT . '/json-schema/en.v1.users.json')),
+];
+
+// Validate using an array:
+$middlewares = [
+    Middleware::payload(['forceArray' => false]),
+    JsonValidator::fromArray([
+        '$schema' => 'http://json-schema.org/draft-04/schema#',
+        'type' => 'object',
+        'properties' => [
+            'id' => [
+                'type' => 'string'
+            ],
+        ],
+        'required' => [
+            'id',
+        ]
+    ]);
+];
+
+// Override the default error handler, which responds with a 422 status code and application/json Content-Type:
+$middlewares = [
+    Middleware::payload(['forceArray' => false]),
+    JsonValidator::fromFile(new \SplFileObject('schema.json'))
+        ->setErrorHandler(function ($request, $response, array $errors) {
+            $response->getBody()->write('Failed JSON validation.');
+
+            return $response->withStatus(400, 'Oops')
+                ->withHeader('Content-Type', 'text/plain');
+        }),
+];
+```
+
+### JsonSchema
+
+Uses [justinrainbow/json-schema](https://github.com/justinrainbow/json-schema) to validate an `application/json` request body using route-matched JSON schemas:
+
+```php
+use Psr7Middlewares\Middleware;
+
+$middlewares = [
+
+    // Transform `application/json` into an object, which is a requirement of `justinrainbow/json-schema`.
+    Middleware::payload([
+        'forceArray' => false,
+    ]),
+
+    // Provide a map of route-prefixes to JSON schema files.
+    Middleware::jsonSchema([
+        '/en/v1/users' => WEB_ROOT . '/json-schema/en.v1.users.json',
+        '/en/v1/posts' => WEB_ROOT . '/json-schema/en.v1.posts.json',
+        '/en/v2/posts' => WEB_ROOT . '/json-schema/en.v2.posts.json',
+    ])
+];
 ```
 
 ### LanguageNegotiation
@@ -829,12 +991,11 @@ Uses [willdurand/Negotiation](https://github.com/willdurand/Negotiation) to dete
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\LanguageNegotiator;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::LanguageNegotiator(['gl', 'en']) //Available languages
         ->usePath(true)                          //(optional) To search the language in the path: /gl/, /en/
         ->redirect()                             //(optional) To return a redirection if the language is not in the path
-        ->basePath('/web')                       //(optional) Basepath used to search the language
 
     function ($request, $response, $next) {
         //Get the preferred language
@@ -842,7 +1003,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### LeagueRoute
@@ -859,10 +1020,10 @@ $router->get('/blog/{id:[0-9]+}', function ($request, $response, $vars) {
     return 'This is the post number'.$vars['id'];
 });
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::LeagueRoute($router) //The RouteCollection instance
-]);
+];
 ```
 
 ### MethodOverride
@@ -872,12 +1033,14 @@ Overrides the request method using the `X-Http-Method-Override` header. This is 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::MethodOverride()
         ->get(['HEAD', 'CONNECT', 'TRACE', 'OPTIONS']), //(optional) to customize the allowed GET overrided methods
         ->post(['PATCH', 'PUT', 'DELETE', 'COPY', 'LOCK', 'UNLOCK']), //(optional) to customize the allowed POST overrided methods
-]);
+        ->parameter('method-override') //(optional) to use a parsed body and uri query parameter in addition to the header
+        ->parameter('method-override', false) //(optional) to use only the parsed body (but not the uri query)
+];
 ```
 
 ### Minify
@@ -887,13 +1050,13 @@ Uses [mrclay/minify](https://github.com/mrclay/minify) to minify the html, css a
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
-    //required to get the format of the response
+$middlewares = [
+
+    //(recomended) to detect the mimetype of the response
     Middleware::formatNegotiator(),
 
     Middleware::Minify()
-]);
+];
 ```
 
 ### Payload
@@ -903,9 +1066,12 @@ Parses the body of the request if it's not parsed and the method is POST, PUT or
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
-    Middleware::Payload(),
+$middlewares = [
+
+    Middleware::Payload([     // (optional) Array of parsing options:
+        'forceArray' => false // Force to use arrays instead objects in json (true by default)
+    ])
+    ->override(),             // (optional) To override the existing parsed body if exists (false by default)
 
     function ($request, $response, $next) {
         //Get the parsed body
@@ -913,7 +1079,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### PhpSession
@@ -924,8 +1090,8 @@ Initializes a [php session](http://php.net/manual/en/book.session.php) using the
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
+$middlewares = [
+
     Middleware::PhpSession()
         ->name('SessionId') //(optional) Name of the session
         ->id('ABC123')      //(optional) Id of the session
@@ -936,7 +1102,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### Piwik
@@ -946,31 +1112,31 @@ To use the [Piwik](https://piwik.org/) analytics platform. Injects the javascrip
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
-    //required to get the format of the request
+$middlewares = [
+
+    //(recomended) to detect html responses
     Middleware::formatNegotiator(),
-    
+
     Middleware::Piwik()
         ->piwikUrl('//example.com/piwik')    // The url of the installed piwik
         ->siteId(1)                          // (optional) The site id (1 by default)
         ->addOption('setDoNotTrack', 'true') // (optional) Add more options to piwik API
-]);
+];
 ```
 
 ### ReadResponse
 
-Read the response content from a file. It's the opposite of [SaveResponse](#saveresponse)
+Read the response content from a file. It's the opposite of [SaveResponse](#saveresponse). The option `continueOnError` changes the behaviour of the middleware to continue with the next middleware if the response file is NOT found and returns directly the response if the file is found. This is useful to use the middleware as a file based cache and add a router middleware (or other readResponses) next in the queue.
 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::ReadResponse('path/to/files') // Path where the files are stored
         ->appendQuery(true)                   // (optional) to use the uri query in the filename
-        ->basePath('public')                  // (optional) basepath ignored from the request uri
-]);
+        ->continueOnError(true)               // (optional) to continue with the next middleware on error or not
+];
 ```
 
 ### Recaptcha
@@ -980,13 +1146,13 @@ To use the [google recaptcha](https://github.com/google/recaptcha) library for s
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
-    
+$middlewares = [
+
     //required to get the user IP
     Middleware::ClientIp(),
-    
+
     Middleware::Recapcha('secret') //The secret key
-]);
+];
 ```
 
 ### Rename
@@ -1001,7 +1167,7 @@ Note that the original path wont be publicly accesible. On above examples, reque
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::Rename([
         '/admin' => '/admin-19640983',
@@ -1012,7 +1178,7 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### ResponseTime
@@ -1022,10 +1188,10 @@ Calculates the response time (in miliseconds) and saves it into `X-Response-Time
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::ResponseTime()
-]);
+];
 ```
 
 ### Robots
@@ -1035,10 +1201,10 @@ Disables the robots of the search engines for non-production environment. Adds a
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::Robots(false) //(optional) Set true to allow search engines instead disallow
-]);
+];
 ```
 
 ### SaveResponse
@@ -1055,12 +1221,11 @@ This is useful for cache purposes
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::SaveResponse('path/to/files') //Path directory where save the responses
         ->appendQuery(true)                   // (optional) to append the uri query to the filename
-        ->basePath('public')                  //(optional) basepath ignored from the request uri
-]);
+];
 ```
 
 ### Shutdown
@@ -1074,11 +1239,11 @@ function shutdownHandler ($request, $response, $app) {
     $response->getBody()->write('Service unavailable');
 }
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::Shutdown('shutdownHandler') //(optional) Callable that generate the response
         ->arguments($app)                   //(optional) to add extra arguments to the handler
-]);
+];
 ```
 
 ### TrailingSlash
@@ -1088,12 +1253,11 @@ Removes (or adds) the trailing slash of the path. For example, `/post/23/` will 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::TrailingSlash(true) //(optional) set true to add the trailing slash instead remove
         ->redirect(301)             //(optional) to return a 301 (seo friendly) or 302 response to the new path
-        ->basePath('public')        //(optional) basepath
-]);
+];
 ```
 
 ### Uuid
@@ -1104,7 +1268,7 @@ Uses [ramsey/uuid (3.x)](https://github.com/ramsey/uuid) to generate an Uuid (Un
 use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Middleware\Uuid;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::Uuid()
         ->version(4)     //(optional) version of the identifier (1 by default). Versions 3 and 5 need more arguments (see https://github.com/ramsey/uuid#examples)
@@ -1121,12 +1285,12 @@ $dispatcher = $relay->getInstance([
 
         return $next($request, $response);
     }
-]);
+];
 ```
 
 ### Whoops
 
-To use [whoops](https://github.com/filp/whoops) as error handler.
+To use [whoops 2.x](https://github.com/filp/whoops) as error handler.
 
 ```php
 use Psr7Middlewares\Middleware;
@@ -1135,11 +1299,14 @@ use Whoops\Run;
 
 $whoops = new Run();
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
-    Middleware::Whoops($whoops) //(optional) provide a whoops instance
+    //(recomended) to allows to choose the best handler according with the response mimetype
+    Middleware::formatNegotiator(),
+
+    Middleware::Whoops($whoops) //(optional) provide a custom whoops instance
         ->catchErrors(false)    //(optional) to catch not only exceptions but also php errors (true by default)
-]);
+];
 ```
 
 ### Www
@@ -1152,11 +1319,11 @@ Adds or removes the `www` subdomain in the host uri and, optionally, returns a r
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     Middleware::Www(true) //(optional) Add www instead remove it
         ->redirect(301)   //(optional) to return a 301 (seo friendly), 302 response to the new host or false to don't redirect. (301 by default)
-]);
+];
 ```
 
 ## Lazy/conditional middleware creation
@@ -1165,13 +1332,14 @@ You may want to create middleware in a lazy way under some circunstances:
 
 * The middleware is needed only in a specific context (for example in development environments)
 * The middleware creation is expensive and is not needed always (because a previous middleware returns a cached response)
+* The middleware is needed only in a specific path
 
 To handle with this, you can use the `Middleware::create()` method that must return a callable or false. Example:
 
 ```php
 use Psr7Middlewares\Middleware;
 
-$dispatcher = $relay->getInstance([
+$middlewares = [
 
     //This middleware can return a cached response
     //so the next middleware may not be executed
@@ -1194,15 +1362,29 @@ $dispatcher = $relay->getInstance([
         }
 
         return false;
-    })
-]);
+    }),
+
+    //This middleware is needed only in a specific basePath
+    Middleware::create('/admin', function () {
+        return Middleware::DigestAuthentication(['user' => 'pass']);
+    }),
+
+    //This middleware is needed in some cases under a specific basePath
+    Middleware::create('/actions', function ($request, $response) {
+        if ($request->hasHeader('Foo')) {
+            return Middleware::responseTime();
+        }
+
+        return false;
+    }),
+];
 ```
 
 ## Extending middlewares
 
-Some middlewares use different functions to change the http messages, depending of some circunstances. For example, [Payload](#payload) parses the raw body content, and the method used depends of the type of the content: it can be json, urlencoded, csv, etc. Other example is the [Minify](#minify) middleware that needs a different minifier for each format (html, css, js, etc), or the [Gzip](#gzip) that depending of the `Accept-Encoding` header, use a different method to compress the response body.
+Some middleware pieces use different functions to change the http messages, depending of some circunstances. For example, [Payload](#payload) parses the raw body content, and the method used depends of the type of the content: it can be json, urlencoded, csv, etc. Other example is the [Minify](#minify) middleware that needs a different minifier for each format (html, css, js, etc), or the [Gzip](#gzip) that depending of the `Accept-Encoding` header, use a different method to compress the response body.
 
-The interface `Psr7Middlewares\Transformers\ResolverInterface` provides a way to resolve and returns the apropiate "transformer" in each case. The transformer is just a callable that accepts a http message (request or response) and returns the transformed message again. You can create custom resolvers or extend the included in this package to add your owns. Let's see an example:
+The interface `Psr7Middlewares\Transformers\ResolverInterface` provides a way to resolve and returns the apropiate "transformer" in each case. The transformer is just a callable with a specific signature. You can create custom resolvers or extend the included in this package to add your owns. Let's see an example:
 
 ```php
 use Psr7Middlewares\Transformers\BodyParser;
@@ -1222,9 +1404,9 @@ class MyBodyParser extends BodyParser
 }
 
 //Use the resolver
-$dispatcher = $relay->getInstance([
+$middlewares = [
     Middleware::Payload()->resolver(new MyBodyParser())
-]);
+];
 ```
 
 The following middlewares are using resolvers that you can customize:

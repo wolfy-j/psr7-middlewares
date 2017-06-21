@@ -2,11 +2,9 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Utils;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
-use RuntimeException;
 use Exception;
 
 /**
@@ -16,6 +14,9 @@ class FormTimestamp
 {
     use Utils\FormTrait;
     use Utils\CryptTrait;
+    use Utils\AttributeTrait;
+
+    const KEY_GENERATOR = 'FORM_TIMESTAMP_GENERATOR';
 
     /**
      * @var string The honeypot input name
@@ -33,10 +34,22 @@ class FormTimestamp
     private $max = 0;
 
     /**
+     * Returns a callable to generate the inputs.
+     *
+     * @param ServerRequestInterface $request
+     *
+     * @return callable|null
+     */
+    public static function getGenerator(ServerRequestInterface $request)
+    {
+        return self::getAttribute($request, self::KEY_GENERATOR);
+    }
+
+    /**
      * Set the field name.
-     * 
+     *
      * @param string $inputName
-     * 
+     *
      * @return self
      */
     public function inputName($inputName)
@@ -48,9 +61,9 @@ class FormTimestamp
 
     /**
      * Minimum time required.
-     * 
+     *
      * @param int $seconds
-     * 
+     *
      * @return self
      */
     public function min($seconds)
@@ -62,9 +75,9 @@ class FormTimestamp
 
     /**
      * Max time before expire the form.
-     * 
+     *
      * @param int $seconds
-     * 
+     *
      * @return self
      */
     public function max($seconds)
@@ -85,11 +98,7 @@ class FormTimestamp
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, FormatNegotiator::KEY)) {
-            throw new RuntimeException('FormTimestamp middleware needs FormatNegotiator executed before');
-        }
-
-        if (FormatNegotiator::getFormat($request) !== 'html') {
+        if (Utils\Helpers::getMimeType($response) !== 'text/html') {
             return $next($request, $response);
         }
 
@@ -97,20 +106,30 @@ class FormTimestamp
             return $response->withStatus(403);
         }
 
-        $response = $next($request, $response);
-
         $value = $this->encrypt(time());
 
-        return $this->insertIntoPostForms($response, function ($match) use ($value) {
-            return $match[0].'<input type="hidden" name="'.$this->inputName.'" value="'.$value.'">';
+        $generator = function () use ($value) {
+            return '<input type="hidden" name="'.$this->inputName.'" value="'.$value.'">';
+        };
+
+        if (!$this->autoInsert) {
+            $request = self::setAttribute($request, self::KEY_GENERATOR, $generator);
+
+            return $next($request, $response);
+        }
+
+        $response = $next($request, $response);
+
+        return $this->insertIntoPostForms($response, function ($match) use ($generator) {
+            return $match[0].$generator();
         });
     }
 
     /**
      * Check whether the request is valid.
-     * 
+     *
      * @param ServerRequestInterface $request
-     * 
+     *
      * @return bool
      */
     private function isValid(ServerRequestInterface $request)

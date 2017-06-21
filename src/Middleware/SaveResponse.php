@@ -44,10 +44,10 @@ class SaveResponse
 
     /**
      * Check whether the response can be saved or not.
-     * 
+     *
      * @param RequestInterface  $request
      * @param ResponseInterface $response
-     * 
+     *
      * @return bool
      */
     private function canSave(RequestInterface $request, ResponseInterface $response)
@@ -60,11 +60,11 @@ class SaveResponse
             return false;
         }
 
-        if (!$this->testBasePath($request->getUri()->getPath())) {
+        if (!$this->appendQuery && !empty($request->getUri()->getQuery())) {
             return false;
         }
 
-        if (!$this->appendQuery && !empty($request->getUri()->getQuery())) {
+        if ($response->hasHeader('location')) {
             return false;
         }
 

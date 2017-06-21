@@ -2,17 +2,33 @@
 
 namespace Psr7Middlewares;
 
-use Psr\Http\Message\StreamInterface;
 use Psr\Http\Message\RequestInterface;
-use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use RuntimeException;
+use InvalidArgumentException;
 
 class Middleware
 {
     const KEY = 'Psr7Middlewares\\Middleware';
+    const STORAGE_KEY = 'STORAGE_KEY';
 
     private static $streamFactory;
+    private static $namespaces = ['Psr7Middlewares\\Middleware\\'];
+
+    /**
+     * Register a new namespace.
+     *
+     * @param string $namespace
+     * @param bool   $prepend
+     */
+    public static function registerNamespace($namespace, $prepend = false)
+    {
+        if (false === $prepend) {
+            self::$namespaces[] = $namespace;
+        } else {
+            array_unshift(self::$namespaces, $namespace);
+        }
+    }
 
     /**
      * Set the stream factory used by some middlewares.
@@ -25,21 +41,13 @@ class Middleware
     }
 
     /**
-     * Get the stream factory.
+     * Set the stream factory used by some middlewares.
      *
-     * @return StreamInterface
+     * @param callable|null
      */
-    public static function createStream($file = 'php://temp', $mode = 'r+')
+    public static function getStreamFactory()
     {
-        if (empty(self::$streamFactory)) {
-            if (class_exists('Zend\\Diactoros\\Stream')) {
-                return new \Zend\Diactoros\Stream($file, $mode);
-            }
-
-            throw new \RuntimeException('Unable to create a stream. No stream factory defined');
-        }
-
-        return call_user_func(self::$streamFactory, $file, $mode);
+        return self::$streamFactory;
     }
 
     /**
@@ -50,18 +58,20 @@ class Middleware
      */
     public static function __callStatic($name, $args)
     {
-        $class = __NAMESPACE__.'\\Middleware\\'.ucfirst($name);
+        foreach (self::$namespaces as $namespace) {
+            $class = $namespace.ucfirst($name);
 
-        if (class_exists($class)) {
-            switch (count($args)) {
-                case 0:
-                    return new $class();
+            if (class_exists($class)) {
+                switch (count($args)) {
+                    case 0:
+                        return new $class();
 
-                case 1:
-                    return new $class($args[0]);
+                    case 1:
+                        return new $class($args[0]);
 
-                default:
-                    return (new \ReflectionClass($class))->newInstanceArgs($args);
+                    default:
+                        return (new \ReflectionClass($class))->newInstanceArgs($args);
+                }
             }
         }
 
@@ -71,14 +81,31 @@ class Middleware
     /**
      * Create a middleware callable that acts as a "proxy" to a real middleware that must be returned by the given callback.
      *
-     * @param callable $factory Takes no argument and MUST return a middleware callable or false
-     * 
+     * @param callable|string $basePath The base path in which the middleware is created (optional)
+     * @param callable        $factory  Takes no argument and MUST return a middleware callable or false
+     *
      * @return callable
      */
-    public static function create(callable $factory)
+    public static function create($basePath, callable $factory = null)
     {
-        return function (RequestInterface $request, ResponseInterface $response, callable $next) use ($factory) {
-            $middleware = $factory($request, $response);
+        if ($factory === null) {
+            $factory = $basePath;
+            $basePath = '';
+        }
+
+        if (!is_callable($factory)) {
+            throw new InvalidArgumentException('Invalid callable provided');
+        }
+
+        return function (RequestInterface $request, ResponseInterface $response, callable $next) use ($basePath, $factory) {
+            $path = rtrim($request->getUri()->getPath(), '/');
+            $basePath = rtrim($basePath, '/');
+
+            if ($path === $basePath || strpos($path, "{$basePath}/") === 0) {
+                $middleware = $factory($request, $response);
+            } else {
+                $middleware = false;
+            }
 
             if ($middleware === false) {
                 return $next($request, $response);
@@ -90,58 +117,5 @@ class Middleware
 
             return $middleware($request, $response, $next);
         };
-    }
-
-    /**
-     * Store an attribute in the request.
-     *
-     * @param ServerRequestInterface $request
-     * @param string                 $name
-     * @param mixed                  $value
-     *
-     * @return ServerRequestInterface
-     */
-    public static function setAttribute(ServerRequestInterface $request, $name, $value)
-    {
-        $attributes = $request->getAttribute(self::KEY, []);
-        $attributes[$name] = $value;
-
-        return $request->withAttribute(self::KEY, $attributes);
-    }
-
-    /**
-     * Retrieves an attribute from the request.
-     *
-     * @param ServerRequestInterface $request
-     * @param string                 $name
-     *
-     * @return mixed
-     */
-    public static function getAttribute(ServerRequestInterface $request, $name)
-    {
-        $attributes = $request->getAttribute(self::KEY);
-
-        if (isset($attributes[$name])) {
-            return $attributes[$name];
-        }
-    }
-
-    /**
-     * Check whether an attribute exists.
-     *
-     * @param ServerRequestInterface $request
-     * @param string                 $name
-     *
-     * @return bool
-     */
-    public static function hasAttribute(ServerRequestInterface $request, $name)
-    {
-        $attributes = $request->getAttribute(self::KEY);
-
-        if (empty($attributes)) {
-            return false;
-        }
-
-        return array_key_exists($name, $attributes);
     }
 }

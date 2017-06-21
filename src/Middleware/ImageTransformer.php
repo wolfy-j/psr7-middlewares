@@ -3,12 +3,10 @@
 namespace Psr7Middlewares\Middleware;
 
 use Psr7Middlewares\Utils;
-use Psr7Middlewares\Middleware;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Cache\CacheItemPoolInterface;
 use Imagecow\Image;
-use RuntimeException;
 
 /**
  * Middleware to manipulate images on demand.
@@ -16,6 +14,10 @@ use RuntimeException;
 class ImageTransformer
 {
     use Utils\CacheMessageTrait;
+    use Utils\AttributeTrait;
+    use Utils\StreamTrait;
+
+    const KEY_GENERATOR = 'IMAGE_TRANSFORMER';
 
     /**
      * @var array|false Enable client hints
@@ -28,25 +30,50 @@ class ImageTransformer
     private $sizes = [];
 
     /**
+     * Returns a callable to generate urls.
+     *
+     * @param ServerRequestInterface $request
+     *
+     * @return callable|null
+     */
+    public static function getGenerator(ServerRequestInterface $request)
+    {
+        return self::getAttribute($request, self::KEY_GENERATOR);
+    }
+
+    /**
      * Define the available sizes, for example:
      * [
      *    'small'  => 'resizeCrop,50,50',
      *    'medium' => 'resize,500',
      *    'big'    => 'resize,1000',
      * ].
-     * 
+     *
      * @param array $sizes
      */
     public function __construct(array $sizes)
     {
-        $this->sizes = $sizes;
+        foreach ($sizes as $prefix => $transform) {
+            if (strpos($prefix, '/') === false) {
+                $path = '';
+            } else {
+                $path = pathinfo($prefix, PATHINFO_DIRNAME);
+                $prefix = pathinfo($prefix, PATHINFO_BASENAME);
+            }
+
+            if (!isset($this->sizes[$prefix])) {
+                $this->sizes[$prefix] = [$path => $transform];
+            } else {
+                $this->sizes[$prefix][$path] = $transform;
+            }
+        }
     }
 
     /**
      * To save the transformed images in the cache.
-     * 
+     *
      * @param CacheItemPoolInterface $cache
-     * 
+     *
      * @return self
      */
     public function cache(CacheItemPoolInterface $cache)
@@ -58,9 +85,9 @@ class ImageTransformer
 
     /**
      * Enable the client hints.
-     * 
+     *
      * @param array $clientHints
-     * 
+     *
      * @return self
      */
     public function clientHints($clientHints = ['Dpr', 'Viewport-Width', 'Width'])
@@ -81,17 +108,10 @@ class ImageTransformer
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, FormatNegotiator::KEY)) {
-            throw new RuntimeException('ResponsiveImage middleware needs FormatNegotiator executed before');
-        }
-
-        $format = FormatNegotiator::getFormat($request);
-
-        switch ($format) {
-            case 'jpg':
-            case 'jpeg':
-            case 'gif':
-            case 'png':
+        switch (Utils\Helpers::getMimeType($response)) {
+            case 'image/jpeg':
+            case 'image/gif':
+            case 'image/png':
                 $key = $this->getCacheKey($request);
 
                 //Get from the cache
@@ -105,10 +125,9 @@ class ImageTransformer
                     break;
                 }
 
-                //Removes the transform from the path
+                //Removes the transform info in the path
                 list($path, $transform) = $info;
                 $request = $request->withUri($request->getUri()->withPath($path));
-
                 $response = $next($request, $response);
 
                 //Transform
@@ -120,24 +139,38 @@ class ImageTransformer
                 }
 
                 return $response;
+
+            case 'text/html':
+                $generator = function ($path, $transform) {
+                    $info = pathinfo($path);
+
+                    if (!isset($this->sizes[$transform])) {
+                        throw new \InvalidArgumentException(sprintf('The image size "%s" is not valid', $transform));
+                    }
+
+                    return Utils\Helpers::joinPath($info['dirname'], $transform.$info['basename']);
+                };
+
+                $request = self::setAttribute($request, self::KEY_GENERATOR, $generator);
+                $response = $next($request, $response);
+
+                if (!empty($this->clientHints)) {
+                    return $response->withHeader('Accept-CH', implode(',', $this->clientHints));
+                }
+
+                return $response;
         }
 
-        $response = $next($request, $response);
-
-        if ($format = 'html' && !empty($this->clientHints)) {
-            return $response->withHeader('Accept-CH', implode(',', $this->clientHints));
-        }
-
-        return $response;
+        return $next($request, $response);
     }
 
     /**
      * Transform the image.
-     * 
+     *
      * @param ServerRequestInterface $request
      * @param ResponseInterface      $response
      * @param string                 $transform
-     * 
+     *
      * @return ResponseInterface
      */
     private function transform(ServerRequestInterface $request, ResponseInterface $response, $transform)
@@ -152,7 +185,7 @@ class ImageTransformer
 
         $image->transform($transform);
 
-        $body = Middleware::createStream();
+        $body = self::createStream($response->getBody());
         $body->write($image->getString());
 
         return $response
@@ -164,28 +197,28 @@ class ImageTransformer
      * Parses the path and return the file and transform values.
      * For example, the path "/images/small.avatar.jpg" returns:
      * ["/images/avatar.jpg", "resizeCrop,50,50"].
-     * 
+     *
      * @param string $path
-     * 
+     *
      * @return false|array [file, transform]
      */
     private function parsePath($path)
     {
         $info = pathinfo($path);
-        $file = $info['basename'];
-        $path = $info['dirname'];
+        $basename = $info['basename'];
+        $dirname = $info['dirname'];
 
-        foreach ($this->sizes as $pattern => $transform) {
-            if (strpos($pattern, '/') === false) {
-                $patternFile = $pattern;
-                $patternPath = '';
-            } else {
-                $patternFile = pathinfo($pattern, PATHINFO_BASENAME);
-                $patternPath = pathinfo($pattern, PATHINFO_DIRNAME);
+        foreach ($this->sizes as $prefix => $paths) {
+            if (strpos($basename, $prefix) !== 0) {
+                continue;
             }
 
-            if (substr($file, 0, strlen($patternFile)) === $patternFile && ($patternPath === '' || substr($path, -strlen($patternPath)) === $patternPath)) {
-                return [Utils\Helpers::joinPath($path, substr($file, strlen($patternFile))), $transform];
+            foreach ($paths as $path => $transform) {
+                $needle = $path === '' ? '' : substr($dirname, -strlen($path));
+
+                if ($path === $needle) {
+                    return [Utils\Helpers::joinPath($dirname, substr($basename, strlen($prefix))), $transform];
+                }
             }
         }
 
@@ -194,9 +227,9 @@ class ImageTransformer
 
     /**
      * Returns the client hints sent.
-     * 
+     *
      * @param ServerRequestInterface $request
-     * 
+     *
      * @return array|null
      */
     private function getClientHints(ServerRequestInterface $request)
@@ -216,9 +249,9 @@ class ImageTransformer
 
     /**
      * Generates the key used to save the image in cache.
-     * 
+     *
      * @param ServerRequestInterface $request
-     * 
+     *
      * @return string
      */
     private function getCacheKey(ServerRequestInterface $request)

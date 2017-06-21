@@ -2,7 +2,7 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
+use Psr7Middlewares\Utils;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -11,10 +11,12 @@ use Psr\Http\Message\ResponseInterface;
  */
 class Uuid
 {
+    use Utils\AttributeTrait;
+
     const KEY = 'UUID';
 
     /**
-     * @var string|false The header name to use 
+     * @var string|false The header name to use
      */
     private $header = 'X-Uuid';
 
@@ -32,7 +34,7 @@ class Uuid
      */
     public static function getUuid(ServerRequestInterface $request)
     {
-        return Middleware::getAttribute($request, self::KEY);
+        return self::getAttribute($request, self::KEY);
     }
 
     /**
@@ -93,13 +95,15 @@ class Uuid
     {
         $uuid = $this->generateUuid();
 
-        $request = Middleware::setAttribute($request, self::KEY, $uuid);
+        $request = self::setAttribute($request, self::KEY, $uuid);
 
-        if (!empty($this->header)) {
-            $request = $request->withHeader($this->header, (string) $uuid);
+        if (empty($this->header)) {
+            return $next($request, $response);
         }
 
-        return $next($request, $response);
+        $request = $request->withHeader($this->header, (string) $uuid);
+
+        return $next($request, $response)->withHeader($this->header, (string) $uuid);
     }
 
     /**

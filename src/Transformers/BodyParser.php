@@ -2,28 +2,36 @@
 
 namespace Psr7Middlewares\Transformers;
 
-use Psr\Http\Message\ServerRequestInterface;
+use Psr\Http\Message\StreamInterface;
+use DomainException;
 
 /**
  * Generic resolver to parse the body content.
  */
 class BodyParser extends Resolver
 {
-    /**
-     * @var bool Whether convert the object into associative arrays
-     */
-    private $associative = true;
+    /** @var mixed[] */
+    private $options = [
+        // When true, returned objects will be converted into associative arrays.
+        'forceArray' => true,
+    ];
 
-    public function __construct()
+    /**
+     * BodyParser constructor.
+     *
+     * @param mixed[] $options
+     */
+    public function __construct(array $options = [])
     {
         $this->add('application/json', [$this, 'json']);
         $this->add('application/x-www-form-urlencoded', [$this, 'urlencode']);
         $this->add('text/csv', [$this, 'csv']);
+        $this->options = array_merge($this->options, $options);
     }
 
     /**
      * @param string $id
-     * 
+     *
      * @return callable|null
      */
     public function resolve($id)
@@ -37,43 +45,53 @@ class BodyParser extends Resolver
 
     /**
      * JSON parser.
-     * 
-     * @param ServerRequestInterface $request
-     * 
-     * @return ServerRequestInterface
+     *
+     * @param StreamInterface $body
+     *
+     * @return array|object Returns an array when $assoc is true, and an object when $assoc is false
      */
-    public function json(ServerRequestInterface $request)
+    public function json(StreamInterface $body)
     {
-        $data = json_decode((string) $request->getBody(), $this->associative);
+        $assoc = (bool) $this->options['forceArray'];
 
-        return $request->withParsedBody($data);
+        $string = (string) $body;
+
+        if ($string === '') {
+            return [];
+        }
+
+        $data = json_decode($string, $assoc);
+
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new DomainException(json_last_error_msg());
+        }
+
+        return $data ?: [];
     }
 
     /**
      * Parses url-encoded strings.
-     * 
-     * @param ServerRequestInterface $request
-     * 
-     * @return ServerRequestInterface
+     *
+     * @param StreamInterface $body
+     *
+     * @return array
      */
-    public function urlencode(ServerRequestInterface $request)
+    public function urlencode(StreamInterface $body)
     {
-        parse_str((string) $request->getBody(), $data);
+        parse_str((string) $body, $data);
 
-        return $request->withParsedBody($data ?: []);
+        return $data ?: [];
     }
 
     /**
      * Parses csv strings.
-     * 
-     * @param ServerRequestInterface $request
-     * 
-     * @return ServerRequestInterface
+     *
+     * @param StreamInterface $body
+     *
+     * @return array
      */
-    public function csv(ServerRequestInterface $request)
+    public function csv(StreamInterface $body)
     {
-        $body = $request->getBody();
-
         if ($body->isSeekable()) {
             $body->rewind();
         }
@@ -87,6 +105,6 @@ class BodyParser extends Resolver
 
         fclose($stream);
 
-        return $request->withParsedBody($data);
+        return $data;
     }
 }

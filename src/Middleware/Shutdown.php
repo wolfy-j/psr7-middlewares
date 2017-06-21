@@ -3,7 +3,6 @@
 namespace Psr7Middlewares\Middleware;
 
 use Psr7Middlewares\Utils;
-use Psr7Middlewares\Middleware;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -26,7 +25,7 @@ class Shutdown
      */
     public function __construct($handler = null)
     {
-        $this->handler = $handler ?: self::CLASS.'::defaultHandler';
+        $this->handler = $handler ?: self::class.'::defaultHandler';
     }
 
     /**
@@ -47,12 +46,13 @@ class Shutdown
 
     public static function defaultHandler()
     {
-        return <<<EOT
+        return <<<'EOT'
 <!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
     <title>503. Site under maintenance</title>
+    <style>html{font-family: sans-serif;}</style>
     <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>

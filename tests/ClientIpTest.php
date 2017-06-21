@@ -33,7 +33,7 @@ class ClientIpTest extends Base
     {
         $response = $this->execute(
             [
-                Middleware::ClientIp(),
+                Middleware::ClientIp()->headers(),
                 function ($request, $response, $next) {
                     $response->getBody()->write(json_encode([
                         'CLIENT_IPS' => ClientIp::getIps($request),

@@ -2,7 +2,6 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Utils;
 use Psr7Middlewares\Transformers;
 use Psr\Http\Message\ServerRequestInterface;
@@ -15,6 +14,8 @@ use RuntimeException;
 class Gzip
 {
     use Utils\ResolverTrait;
+    use Utils\AttributeTrait;
+    use Utils\StreamTrait;
 
     /**
      * Execute the middleware.
@@ -27,17 +28,22 @@ class Gzip
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, EncodingNegotiator::KEY)) {
+        if (!self::hasAttribute($request, EncodingNegotiator::KEY)) {
             throw new RuntimeException('Gzip middleware needs EncodingNegotiator executed before');
         }
 
         $response = $next($request, $response);
 
         $resolver = $this->resolver ?: new Transformers\Encoder();
-        $transformer = $resolver->resolve(EncodingNegotiator::getEncoding($request));
+        $encoding = EncodingNegotiator::getEncoding($request);
+        $transformer = $resolver->resolve($encoding);
 
         if ($transformer) {
-            $response = $transformer($response);
+            $body = $response->getBody();
+
+            return $response
+                ->withHeader('Content-Encoding', $encoding)
+                ->withBody($transformer($body, self::createStream($body)));
         }
 
         return $response;

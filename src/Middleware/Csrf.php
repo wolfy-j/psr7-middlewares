@@ -2,13 +2,10 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Utils;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
-use InvalidArgumentException;
 use RuntimeException;
-use ArrayAccess;
 
 /**
  * Middleware for CSRF protection
@@ -17,6 +14,10 @@ use ArrayAccess;
 class Csrf
 {
     use Utils\FormTrait;
+    use Utils\StorageTrait;
+
+    const KEY = 'CSRF';
+    const KEY_GENERATOR = 'CSRF_GENERATOR';
 
     /**
      * @var int Max number of CSRF tokens
@@ -33,30 +34,16 @@ class Csrf
      */
     private $formToken = '_CSRF_TOKEN';
 
-    /*
-     * @var array|ArrayAccess CSRF storage
-     */
-    private $storage;
-
     /**
-     * @var string Index used in the storage
+     * Returns a callable to generate the inputs.
+     *
+     * @param ServerRequestInterface $request
+     *
+     * @return callable|null
      */
-    private $sessionIndex = 'CSRF';
-
-    /**
-     * Set the storage of the CSRF.
-     * 
-     * @param array|ArrayAccess|null $storage
-     */
-    public function __construct(&$storage = null)
+    public static function getGenerator(ServerRequestInterface $request)
     {
-        if (is_array($storage)) {
-            $this->storage = &$storage;
-        } elseif ($storage instanceof ArrayAccess) {
-            $this->storage = $storage;
-        } elseif ($storage !== null) {
-            throw new InvalidArgumentException('The storage argument must be an array, ArrayAccess or null');
-        }
+        return self::getAttribute($request, self::KEY_GENERATOR);
     }
 
     /**
@@ -70,66 +57,66 @@ class Csrf
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, FormatNegotiator::KEY)) {
-            throw new RuntimeException('Csrf middleware needs FormatNegotiator executed before');
-        }
-
-        if (!Middleware::hasAttribute($request, ClientIp::KEY)) {
+        if (!self::hasAttribute($request, ClientIp::KEY)) {
             throw new RuntimeException('Csrf middleware needs ClientIp executed before');
         }
 
-        if ($this->storage === null) {
-            if (session_status() !== PHP_SESSION_ACTIVE) {
-                throw new RuntimeException('Csrf middleware needs an active php session or a storage defined');
-            }
-
-            if (!isset($_SESSION[$this->sessionIndex])) {
-                $_SESSION[$this->sessionIndex] = [];
-            }
-
-            $this->storage = &$_SESSION[$this->sessionIndex];
-        }
-
-        if (FormatNegotiator::getFormat($request) !== 'html') {
+        if (Utils\Helpers::getMimeType($response) !== 'text/html') {
             return $next($request, $response);
         }
 
-        if (Utils\Helpers::isPost($request) && !$this->validateRequest($request)) {
+        $tokens = &self::getStorage($request, self::KEY);
+
+        if (Utils\Helpers::isPost($request) && !$this->validateRequest($request, $tokens)) {
             return $response->withStatus(403);
+        }
+
+        $generator = function ($action = null) use ($request, &$tokens) {
+            if (empty($action)) {
+                $action = $request->getUri()->getPath();
+            }
+
+            return $this->generateTokens($request, $action, $tokens);
+        };
+
+        if (!$this->autoInsert) {
+            $request = self::setAttribute($request, self::KEY_GENERATOR, $generator);
+
+            return $next($request, $response);
         }
 
         $response = $next($request, $response);
 
-        return $this->insertIntoPostForms($response, function ($match) use ($request) {
+        return $this->insertIntoPostForms($response, function ($match) use ($generator) {
             preg_match('/action=["\']?([^"\'\s]+)["\']?/i', $match[0], $matches);
 
-            $action = empty($matches[1]) ? $request->getUri()->getPath() : $matches[1];
-
-            return $match[0].$this->generateTokens($request, $action);
+            return $match[0].$generator(isset($matches[1]) ? $matches[1] : null);
         });
     }
 
     /**
      * Generate and retrieve the tokens.
-     * 
+     *
      * @param ServerRequestInterface $request
      * @param string                 $lockTo
+     * @param array                  $tokens
      *
      * @return string
      */
-    private function generateTokens(ServerRequestInterface $request, $lockTo)
+    private function generateTokens(ServerRequestInterface $request, $lockTo, array &$tokens)
     {
-        $index = self::encode(random_bytes(18));
-        $token = self::encode(random_bytes(32));
+        $index = self::encode($this->randomToken(18));
+        $token = self::encode($this->randomToken(32));
 
-        $this->storage[$index] = [
-            'created' => intval(date('YmdHis')),
+        $tokens[$index] = [
             'uri' => $request->getUri()->getPath(),
             'token' => $token,
             'lockTo' => $lockTo,
         ];
 
-        $this->recycleTokens();
+        if ($this->maxTokens > 0 && ($total = count($tokens)) > $this->maxTokens) {
+            array_splice($tokens, 0, $total - $this->maxTokens);
+        }
 
         $token = self::encode(hash_hmac('sha256', ClientIp::getIp($request), base64_decode($token), true));
 
@@ -139,12 +126,13 @@ class Csrf
 
     /**
      * Validate the request.
-     * 
+     *
      * @param ServerRequestInterface $request
+     * @param array                  &$tokens
      *
      * @return bool
      */
-    private function validateRequest(ServerRequestInterface $request)
+    private function validateRequest(ServerRequestInterface $request, array &$tokens)
     {
         $data = $request->getParsedBody();
 
@@ -155,12 +143,12 @@ class Csrf
         $index = $data[$this->formIndex];
         $token = $data[$this->formToken];
 
-        if (!isset($this->storage[$index])) {
+        if (!isset($tokens[$index])) {
             return false;
         }
 
-        $stored = $this->storage[$index];
-        unset($this->storage[$index]);
+        $stored = $tokens[$index];
+        unset($tokens[$index]);
 
         $lockTo = $request->getUri()->getPath();
 
@@ -174,25 +162,6 @@ class Csrf
     }
 
     /**
-     * Enforce an upper limit on the number of tokens stored in session state
-     * by removing the oldest tokens first.
-     */
-    private function recycleTokens()
-    {
-        if (!$this->maxTokens || count($this->storage) <= $this->maxTokens) {
-            return;
-        }
-
-        uasort($this->storage, function ($a, $b) {
-            return $a['created'] - $b['created'];
-        });
-
-        while (count($this->storage) > $this->maxTokens) {
-            array_shift($this->storage);
-        }
-    }
-
-    /**
      * Encode string with base64, but strip padding.
      * PHP base64_decode does not croak on that.
      *
@@ -203,5 +172,30 @@ class Csrf
     private static function encode($value)
     {
         return rtrim(base64_encode($value), '=');
+    }
+
+    /**
+     * Return a random token.
+     *
+     * @param int $length The length of the random string that should be returned in bytes
+     *
+     * @return string
+     */
+    private function randomToken($length = 32)
+    {
+        if (!isset($length) || intval($length) <= 8) {
+            $length = 32;
+        }
+        if (function_exists('random_bytes')) {
+            return random_bytes($length);
+        }
+        if (function_exists('mcrypt_create_iv')) {
+            return mcrypt_create_iv($length, MCRYPT_DEV_URANDOM);
+        }
+        if (function_exists('openssl_random_pseudo_bytes')) {
+            return openssl_random_pseudo_bytes($length);
+        }
+
+        return @crypt(uniqid());
     }
 }

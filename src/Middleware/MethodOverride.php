@@ -2,8 +2,7 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
-use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
 /**
@@ -22,6 +21,16 @@ class MethodOverride
      * @var array Allowed methods overrided in POST
      */
     private $post = ['PATCH', 'PUT', 'DELETE', 'COPY', 'LOCK', 'UNLOCK'];
+
+    /**
+     * @var null|string The POST parameter name
+     */
+    private $postParam;
+
+    /**
+     * @var null|string The GET parameter name
+     */
+    private $getParam;
 
     /**
      * Set allowed method for GET.
@@ -48,19 +57,38 @@ class MethodOverride
     }
 
     /**
+     * Configure the parameters.
+     *
+     * @param string $name
+     * @param bool   $get
+     *
+     * @return self
+     */
+    public function parameter($name, $get = true)
+    {
+        $this->postParam = $name;
+
+        if ($get) {
+            $this->getParam = $name;
+        }
+
+        return $this;
+    }
+
+    /**
      * Execute the middleware.
      *
-     * @param RequestInterface  $request
-     * @param ResponseInterface $response
-     * @param callable          $next
+     * @param ServerRequestInterface $request
+     * @param ResponseInterface      $response
+     * @param callable               $next
      *
      * @return ResponseInterface
      */
-    public function __invoke(RequestInterface $request, ResponseInterface $response, callable $next)
+    public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
         $method = $this->getOverrideMethod($request);
 
-        if (!empty($method)) {
+        if (!empty($method) && $method !== $request->getMethod()) {
             $allowed = $this->getAllowedOverrideMethods($request);
 
             if (!empty($allowed)) {
@@ -77,28 +105,38 @@ class MethodOverride
 
     /**
      * Returns the override method.
-     * 
-     * @param RequestInterface $request
-     * 
-     * @return string|null
+     *
+     * @param ServerRequestInterface $request
+     *
+     * @return string
      */
-    private function getOverrideMethod(RequestInterface $request)
+    private function getOverrideMethod(ServerRequestInterface $request)
     {
-        $method = $request->getHeaderLine(self::HEADER);
+        if ($request->getMethod() === 'POST' && $this->postParam !== null) {
+            $params = $request->getParsedBody();
 
-        if (!empty($method) && ($method !== $request->getMethod())) {
-            return strtoupper($method);
+            if (isset($params[$this->postParam])) {
+                return strtoupper($params[$this->postParam]);
+            }
+        } elseif ($request->getMethod() === 'GET' && $this->getParam !== null) {
+            $params = $request->getQueryParams();
+
+            if (isset($params[$this->getParam])) {
+                return strtoupper($params[$this->getParam]);
+            }
         }
+
+        return strtoupper($request->getHeaderLine(self::HEADER));
     }
 
     /**
      * Returns the allowed override methods.
-     * 
-     * @param RequestInterface $request
-     * 
+     *
+     * @param ServerRequestInterface $request
+     *
      * @return array
      */
-    private function getAllowedOverrideMethods(RequestInterface $request)
+    private function getAllowedOverrideMethods(ServerRequestInterface $request)
     {
         switch ($request->getMethod()) {
             case 'GET':

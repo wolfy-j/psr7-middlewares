@@ -2,7 +2,7 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
+use Micheh\Cache\Header\RequestCacheControl;
 use Psr\Http\Message\RequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Cache\CacheItemPoolInterface;
@@ -42,15 +42,15 @@ class Cache
 
     /**
      * Set a cache-control header to all responses.
-     * 
+     *
      * @param string|CacheControl $cacheControl
-     * 
+     *
      * @return self
      */
     public function cacheControl($cacheControl)
     {
         if (!($cacheControl instanceof CacheControl)) {
-            $cacheControl = CacheControl::fromString($cacheControl);
+            $cacheControl = RequestCacheControl::fromString($cacheControl);
         }
 
         $this->cacheControl = $cacheControl;
@@ -75,13 +75,14 @@ class Cache
         //If it's cached
         if ($item->isHit()) {
             $headers = $item->get();
+            $cachedResponse = $response->withStatus(304);
 
             foreach ($headers as $name => $header) {
-                $response = $response->withHeader($name, $header);
+                $cachedResponse = $cachedResponse->withHeader($name, $header);
             }
 
-            if ($this->cacheUtil->isNotModified($request, $response)) {
-                return $response->withStatus(304);
+            if ($this->cacheUtil->isNotModified($request, $cachedResponse)) {
+                return $cachedResponse;
             }
 
             $this->cache->deleteItem($key);
@@ -102,12 +103,7 @@ class Cache
         //Save in the cache
         if ($this->cacheUtil->isCacheable($response)) {
             $item->set($response->getHeaders());
-
-            $time = $this->cacheUtil->getLifetime($response);
-
-            if ($time) {
-                $item->expiresAt(time() + $time);
-            }
+            $item->expiresAfter($this->cacheUtil->getLifetime($response));
 
             $this->cache->save($item);
         }

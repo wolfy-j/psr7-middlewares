@@ -4,11 +4,9 @@ namespace Psr7Middlewares\Middleware;
 
 use DebugBar\DebugBar as Bar;
 use DebugBar\StandardDebugBar;
-use Psr7Middlewares\Middleware;
 use Psr7Middlewares\Utils;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
-use RuntimeException;
 
 /**
  * Middleware to render a debugbar in html responses.
@@ -16,6 +14,7 @@ use RuntimeException;
 class DebugBar
 {
     use Utils\HtmlInjectorTrait;
+    use Utils\AttributeTrait;
 
     /**
      * @var Bar|null The debugbar
@@ -41,7 +40,7 @@ class DebugBar
      * Configure whether capture ajax requests to send the data with headers.
      *
      * @param bool $captureAjax
-     * 
+     *
      * @return self
      */
     public function captureAjax($captureAjax = true)
@@ -62,10 +61,6 @@ class DebugBar
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, FormatNegotiator::KEY)) {
-            throw new RuntimeException('This middleware needs FormatNegotiator executed before');
-        }
-
         $renderer = $this->debugBar->getJavascriptRenderer();
 
         //Is an asset?
@@ -76,18 +71,18 @@ class DebugBar
             $file = $renderer->getBasePath().substr($path, strlen($renderPath));
 
             if (file_exists($file)) {
-                $body = Middleware::createStream();
-                $body->write(file_get_contents($file));
-
-                return $response->withBody($body);
+                return $response->withBody(self::createStream($file, 'r'));
             }
         }
 
         $response = $next($request, $response);
 
         //Fix the render baseUrl
-        $renderPath = Utils\Helpers::joinPath(BasePath::getBasePath($request), $renderer->getBaseUrl());
-        $renderer->setBaseUrl($renderPath);
+        $generator = BasePath::getGenerator($request);
+
+        if ($generator) {
+            $renderer->setBaseUrl($generator($renderer->getBaseUrl()));
+        }
 
         $ajax = Utils\Helpers::isAjax($request);
 
@@ -98,7 +93,7 @@ class DebugBar
             }
 
         //Html response
-        } elseif (FormatNegotiator::getFormat($request) === 'html') {
+        } elseif (Utils\Helpers::getMimeType($response) === 'text/html') {
             if (!$ajax) {
                 $response = $this->inject($response, $renderer->renderHead(), 'head');
             }

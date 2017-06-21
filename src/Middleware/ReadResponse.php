@@ -3,10 +3,8 @@
 namespace Psr7Middlewares\Middleware;
 
 use Psr7Middlewares\Utils;
-use Psr7Middlewares\Middleware;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
-use Psr\Http\Message\StreamInterface;
 
 /**
  * Middleware to read the response.
@@ -14,6 +12,23 @@ use Psr\Http\Message\StreamInterface;
 class ReadResponse
 {
     use Utils\FileTrait;
+    use Utils\StreamTrait;
+
+    private $continueOnError = false;
+
+    /**
+     * Configure if continue to the next middleware if the response has not found.
+     *
+     * @param bool $continueOnError
+     *
+     * @return self
+     */
+    public function continueOnError($continueOnError = true)
+    {
+        $this->continueOnError = $continueOnError;
+
+        return $this;
+    }
 
     /**
      * Execute the middleware.
@@ -26,17 +41,14 @@ class ReadResponse
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        //If basePath does not match
-        if (!$this->testBasePath($request->getUri()->getPath())) {
-            return $next($request, $response);
-        }
-
         //If the method is not allowed
         if ($request->getMethod() !== 'GET') {
+            if ($this->continueOnError) {
+                return $next($request, $response);
+            }
+
             return $response->withStatus(405);
         }
-
-        $body = Middleware::createStream();
 
         $file = $this->getFilename($request);
 
@@ -45,51 +57,26 @@ class ReadResponse
             $file .= '.gz';
 
             if (EncodingNegotiator::getEncoding($request) !== 'gzip' || !is_file($file)) {
+                if ($this->continueOnError) {
+                    return $next($request, $response);
+                }
+
                 return $response->withStatus(404);
             }
 
             $response = $response->withHeader('Content-Encoding', 'gzip');
         }
 
-        self::readFile($file, $body);
-
-        $response = $response->withBody($body);
-
         //Handle range header
-        $response = $this->range($request, $response);
-
-        return $next($request, $response);
-    }
-
-    /**
-     * Reads a file and write in the body.
-     * 
-     * @param string          $file
-     * @param StreamInterface $body
-     */
-    private static function readFile($file, StreamInterface $body)
-    {
-        if (filesize($file) <= 4096) {
-            $body->write(file_get_contents($file));
-
-            return;
-        }
-
-        $stream = fopen($file, 'r');
-
-        while (!feof($stream)) {
-            $body->write(fread($stream, 4096));
-        }
-
-        fclose($stream);
+        return $this->range($request, $response->withBody(self::createStream($file, 'r')));
     }
 
     /**
      * Handle range requests.
-     * 
+     *
      * @param ServerRequestInterface $request
      * @param ResponseInterface      $response
-     * 
+     *
      * @return ResponseInterface
      */
     private static function range(ServerRequestInterface $request, ResponseInterface $response)

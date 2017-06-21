@@ -2,7 +2,6 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
@@ -15,7 +14,7 @@ class Delay
 
     /**
      * Set the seconds to delay.
-     * 
+     *
      * @param int|array $seconds Use an array to random values [min, max]
      */
     public function __construct($seconds = [1, 2])

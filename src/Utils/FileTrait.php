@@ -9,8 +9,6 @@ use Psr\Http\Message\RequestInterface;
  */
 trait FileTrait
 {
-    use BasePathTrait;
-
     /**
      * @var string
      */
@@ -33,9 +31,9 @@ trait FileTrait
 
     /**
      * Set whether use or not the uri query to generate the filenames.
-     * 
+     *
      * @param bool $appendQuery
-     * 
+     *
      * @return self
      */
     public function appendQuery($appendQuery = true)
@@ -55,8 +53,7 @@ trait FileTrait
      */
     private function getFilename(RequestInterface $request, $indexExt = 'html')
     {
-        $path = $this->getPath($request->getUri()->getPath());
-
+        $path = urldecode($request->getUri()->getPath());
         $parts = pathinfo($path);
         $path = isset($parts['dirname']) ? $parts['dirname'] : '';
         $filename = isset($parts['basename']) ? $parts['basename'] : '';

@@ -1,24 +1,25 @@
 <?php
+
 namespace Psr7Middlewares\Middleware;
 
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
-use Psr7Middlewares\Middleware;
+use Psr7Middlewares\Utils;
 
 /**
  * Provides ability to route Psr7Middlewares specific attributes into scalar attributes.
- *
- * @todo Raise an exception if no attribute found?
  */
 class AttributeMapper
 {
+    use Utils\AttributeTrait;
+
     /**
      * @var array
      */
     private $mapping = [];
 
     /**
-     * Example:
+     * Example:.
      *
      * [
      *      BasicAuthentication::KEY => 'basic.username'
@@ -40,15 +41,12 @@ class AttributeMapper
      *
      * @return ResponseInterface
      */
-    public function __invoke(
-        ServerRequestInterface $request,
-        ResponseInterface $response,
-        callable $next
-    ) {
+    public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
+    {
         foreach ($this->mapping as $middleware => $attribute) {
             $request = $request->withAttribute(
                 $attribute,
-                Middleware::getAttribute($request, $middleware)
+                self::getAttribute($request, $middleware)
             );
         }
 

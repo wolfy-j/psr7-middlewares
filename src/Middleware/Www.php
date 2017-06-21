@@ -3,7 +3,7 @@
 namespace Psr7Middlewares\Middleware;
 
 use Psr7Middlewares\Utils;
-use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
 /**
@@ -25,20 +25,20 @@ class Www
      */
     public function __construct($addWww = false)
     {
-        $this->addWww = (boolean) $addWww;
+        $this->addWww = (bool) $addWww;
         $this->redirect(301);
     }
 
     /**
      * Execute the middleware.
      *
-     * @param RequestInterface  $request
-     * @param ResponseInterface $response
-     * @param callable          $next
+     * @param ServerRequestInterface $request
+     * @param ResponseInterface      $response
+     * @param callable               $next
      *
      * @return ResponseInterface
      */
-    public function __invoke(RequestInterface $request, ResponseInterface $response, callable $next)
+    public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
         $uri = $request->getUri();
         $host = $uri->getHost();
@@ -52,8 +52,8 @@ class Www
         }
 
         //redirect
-        if (is_int($this->redirectStatus) && ($uri->getHost() !== $host)) {
-            return self::getRedirectResponse($this->redirectStatus, $uri->withHost($host), $response);
+        if ($this->redirectStatus !== false && ($uri->getHost() !== $host)) {
+            return $this->getRedirectResponse($request, $uri->withHost($host), $response);
         }
 
         return $next($request->withUri($uri->withHost($host)), $response);
@@ -65,7 +65,7 @@ class Www
      * - the host is "localhost"
      * - the host is a ip
      * - the host has already a subdomain, for example "subdomain.example.com".
-     * 
+     *
      * @param string $host
      *
      * @return bool

@@ -2,7 +2,7 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
+use Psr7Middlewares\Utils;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Log\LoggerInterface;
@@ -10,6 +10,8 @@ use RuntimeException;
 
 class AccessLog
 {
+    use Utils\AttributeTrait;
+
     /**
      * @var LoggerInterface The router container
      */
@@ -55,7 +57,7 @@ class AccessLog
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, ClientIp::KEY)) {
+        if (!self::hasAttribute($request, ClientIp::KEY)) {
             throw new RuntimeException('AccessLog middleware needs ClientIp executed before');
         }
 
@@ -74,12 +76,12 @@ class AccessLog
     /**
      * Generates a message using the Apache's Common Log format
      * https://httpd.apache.org/docs/2.4/logs.html#accesslog.
-     * 
+     *
      * Note: The user identifier (identd) is ommited intentionally
-     * 
+     *
      * @param ServerRequestInterface $request
      * @param ResponseInterface      $response
-     * 
+     *
      * @return string
      */
     private static function commonFormat(ServerRequestInterface $request, ResponseInterface $response)
@@ -100,10 +102,10 @@ class AccessLog
     /**
      * Generates a message using the Apache's Combined Log format
      * This is exactly the same than Common Log, with the addition of two more fields: Referer and User-Agent headers.
-     * 
+     *
      * @param ServerRequestInterface $request
      * @param ResponseInterface      $response
-     * 
+     *
      * @return string
      */
     private static function combinedFormat(ServerRequestInterface $request, ResponseInterface $response)

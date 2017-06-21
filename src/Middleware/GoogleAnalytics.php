@@ -2,15 +2,14 @@
 
 namespace Psr7Middlewares\Middleware;
 
-use Psr7Middlewares\Middleware;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 use Psr7Middlewares\Utils;
-use RuntimeException;
 
 class GoogleAnalytics
 {
     use Utils\HtmlInjectorTrait;
+    use Utils\AttributeTrait;
 
     /**
      * @var string The site's ID
@@ -38,13 +37,9 @@ class GoogleAnalytics
      */
     public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
-        if (!Middleware::hasAttribute($request, FormatNegotiator::KEY)) {
-            throw new RuntimeException('The GoogleAnalytics middleware needs FormatNegotiator executed before');
-        }
-
         $response = $next($request, $response);
 
-        if (FormatNegotiator::getFormat($request) === 'html' && !Utils\Helpers::isAjax($request)) {
+        if (Utils\Helpers::getMimeType($response) === 'text/html' && !Utils\Helpers::isAjax($request)) {
             return $this->inject($response, $this->getCode());
         }
 
@@ -54,7 +49,7 @@ class GoogleAnalytics
     /**
      * Returns the google code.
      * https://github.com/h5bp/html5-boilerplate/blob/master/src/index.html.
-     * 
+     *
      * @return string
      */
     private function getCode()

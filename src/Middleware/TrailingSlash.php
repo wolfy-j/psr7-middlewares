@@ -3,7 +3,7 @@
 namespace Psr7Middlewares\Middleware;
 
 use Psr7Middlewares\Utils;
-use Psr\Http\Message\RequestInterface;
+use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Message\ResponseInterface;
 
 /**
@@ -11,7 +11,6 @@ use Psr\Http\Message\ResponseInterface;
  */
 class TrailingSlash
 {
-    use Utils\BasePathTrait;
     use Utils\RedirectTrait;
 
     /**
@@ -26,47 +25,39 @@ class TrailingSlash
      */
     public function __construct($addSlash = false)
     {
-        $this->addSlash = (boolean) $addSlash;
+        $this->addSlash = (bool) $addSlash;
     }
 
     /**
      * Execute the middleware.
      *
-     * @param RequestInterface  $request
-     * @param ResponseInterface $response
-     * @param callable          $next
+     * @param ServerRequestInterface $request
+     * @param ResponseInterface      $response
+     * @param callable               $next
      *
      * @return ResponseInterface
      */
-    public function __invoke(RequestInterface $request, ResponseInterface $response, callable $next)
+    public function __invoke(ServerRequestInterface $request, ResponseInterface $response, callable $next)
     {
         $uri = $request->getUri();
         $path = $uri->getPath();
 
-        //Test basePath
-        if (!$this->testBasePath($path)) {
-            return $next($request, $response);
-        }
-
         //Add/remove slash
-        if ($this->addSlash) {
-            if (strlen($path) > 1 && substr($path, -1) !== '/' && !pathinfo($path, PATHINFO_EXTENSION)) {
-                $path .= '/';
+        if (strlen($path) > 1) {
+            if ($this->addSlash) {
+                if (substr($path, -1) !== '/' && !pathinfo($path, PATHINFO_EXTENSION)) {
+                    $path .= '/';
+                }
+            } else {
+                $path = rtrim($path, '/');
             }
-        } else {
-            if (strlen($path) > 1 && substr($path, -1) === '/') {
-                $path = substr($path, 0, -1);
-            }
-        }
-
-        //Ensure the path has one "/"
-        if (empty($path) || $path === $this->basePath) {
-            $path .= '/';
+        } elseif ($path === '') {
+            $path = '/';
         }
 
         //redirect
-        if (is_int($this->redirectStatus) && ($uri->getPath() !== $path)) {
-            return self::getRedirectResponse($this->redirectStatus, $uri->withPath($path), $response);
+        if ($this->redirectStatus !== false && ($uri->getPath() !== $path)) {
+            return $this->getRedirectResponse($request, $uri->withPath($path), $response);
         }
 
         return $next($request->withUri($uri->withPath($path)), $response);
